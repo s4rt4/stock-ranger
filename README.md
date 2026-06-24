@@ -72,8 +72,12 @@ stock_ranger/
 
 ## Status
 
-Fase 1 (MVP) — pipeline inti + UI selesai & teruji end-to-end. Fase 2 (live
-preview, gamut warning, metadata template, batch UX) menyusul.
+- **Fase 1 (MVP)** — pipeline inti + UI ✅ selesai & teruji end-to-end.
+- **Fase 2 (Batch & Metadata UX)** — ✅ selesai: drag & drop SVG, live preview
+  RGB vs CMYK (soft-proof LittleCMS) + gamut warning aktual, metadata template
+  (save/load preset), manual JPG import + pairing, log panel.
+- **Fase 3 (Polish & Packaging)** — TIC check, ICC selector lanjutan, settings
+  persistence, packaging (.deb / RPM / Windows) — menyusul.
 
 ## Lisensi
 

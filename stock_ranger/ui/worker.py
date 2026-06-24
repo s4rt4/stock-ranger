@@ -22,6 +22,7 @@ class PipelineWorker(QThread):
         meta: Metadata,
         settings: OutputSettings,
         prefer_swop: bool,
+        manual_jpgs: dict[str, Path] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -29,6 +30,7 @@ class PipelineWorker(QThread):
         self._meta = meta
         self._settings = settings
         self._prefer_swop = prefer_swop
+        self._manual_jpgs = manual_jpgs or {}
 
     def run(self):  # noqa: D401 — dijalankan di thread terpisah
         # Resolusi profile (first-run download SWOP bila diminta & belum ada)
@@ -49,6 +51,7 @@ class PipelineWorker(QThread):
             self._settings,
             log=self.logLine.emit,
             progress=self._on_progress,
+            manual_jpgs=self._manual_jpgs,
         )
         ok = sum(1 for r in results if r.ok)
         self.progressed.emit(100)

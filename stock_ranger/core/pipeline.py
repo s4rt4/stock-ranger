@@ -68,6 +68,13 @@ def process_one(
         jpg = out_dir / f"{svg.stem}.jpg"
         if settings.jpg_mode == JpgMode.MANUAL and manual_jpg:
             jpg_generator.import_existing(manual_jpg, jpg, quality=settings.jpg_quality)
+        elif settings.jpg_mode == JpgMode.MANUAL:
+            result.warnings.append("Mode manual tapi JPG tak ditemukan — rasterize otomatis")
+            jpg_generator.rasterize(
+                svg, jpg,
+                width=settings.jpg_width, height=settings.jpg_height,
+                dpi=settings.dpi, quality=settings.jpg_quality,
+            )
         else:
             jpg_generator.rasterize(
                 svg, jpg,
@@ -100,13 +107,22 @@ def process_batch(
     *,
     log: LogFn = _noop_log,
     progress: ProgressFn | None = None,
+    manual_jpgs: dict[str, Path] | None = None,
 ) -> list[JobResult]:
-    """Proses banyak SVG. Metadata sama untuk semua (shared)."""
+    """Proses banyak SVG. Metadata sama untuk semua (shared).
+
+    manual_jpgs: mapping stem→path JPG existing untuk mode MANUAL (per file).
+    """
+    manual_jpgs = manual_jpgs or {}
     results: list[JobResult] = []
     total = len(svgs)
     for i, svg in enumerate(svgs):
         results.append(
-            process_one(svg, meta, settings, index=i, total=total, log=log, progress=progress)
+            process_one(
+                svg, meta, settings,
+                index=i, total=total, log=log, progress=progress,
+                manual_jpg=manual_jpgs.get(Path(svg).stem),
+            )
         )
     # Batch ZIP gabungan jika diminta
     if not settings.zip_per_pair and any(r.ok for r in results):
