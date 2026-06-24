@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Output & runtime
+/out/
+output/
+*.zip
+
+# PoC generated artifacts (kept: POC_RESULTS.md, test_rgb.svg, ui_*.png)
+poc/*.eps
+poc/*.pdf
+poc/verify*.png
+poc/test_news.eps
+
+# ICC profiles — JANGAN commit profile Adobe (lisensi). Di-download ke user dir saat runtime.
+*.icc
+*.icm
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
