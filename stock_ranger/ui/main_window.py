@@ -9,7 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QPainter, QPixmap
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -63,13 +64,13 @@ class MainWindow(QMainWindow):
         brand = QWidget()
         bl = QHBoxLayout(brand)
         bl.setContentsMargins(8, 0, 12, 0)
-        bl.setSpacing(2)
+        bl.setSpacing(8)
+        logo = QLabel()
+        logo.setPixmap(self._logo_pixmap(22))
         name = QLabel("Stock Ranger")
         name.setObjectName("brand")
-        dot = QLabel("●")
-        dot.setObjectName("brandDot")
+        bl.addWidget(logo)
         bl.addWidget(name)
-        bl.addWidget(dot)
         tb.addWidget(brand)
         tb.addWidget(self._vsep())
 
@@ -108,6 +109,19 @@ class MainWindow(QMainWindow):
         self.cta_btn.clicked.connect(self._process)
         cl.addWidget(self.cta_btn)
         tb.addWidget(cta)
+
+    def _logo_pixmap(self, size: int) -> QPixmap:
+        """Render mark putih (assets/stock-ranger-mark.svg) untuk toolbar."""
+        path = Path(__file__).resolve().parents[2] / "assets" / "stock-ranger-mark.svg"
+        pm = QPixmap(size, size)
+        pm.fill(Qt.GlobalColor.transparent)
+        r = QSvgRenderer(str(path))
+        if r.isValid():
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            r.render(p)
+            p.end()
+        return pm
 
     def _add_tool(self, tb, icon_name, tip, slot, checkable=False):
         act = QAction(icons.icon(icon_name, Color.ICON, 20), tip, self)

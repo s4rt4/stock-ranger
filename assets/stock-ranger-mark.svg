@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="272" height="228" viewBox="120 128 272 228" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Mark monokrom putih (untuk UI gelap): double-chevron + node -->
+  <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M150 322 L256 224 L362 322" stroke="#ffffff" stroke-opacity="0.45" stroke-width="40"/>
+    <path d="M150 256 L256 158 L362 256" stroke="#ffffff" stroke-width="46"/>
+  </g>
+  <rect x="240" y="142" width="32" height="32" rx="7" transform="rotate(45 256 158)" fill="#ffffff"/>
+</svg>
