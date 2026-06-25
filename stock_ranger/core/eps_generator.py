@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import struct
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from .util import PipelineError, run
@@ -205,9 +206,16 @@ def generate(
     icc_profile: Path | None = None,
     embed_preview: bool = True,
     spoof_header: bool = True,
+    on_raw: "Callable[[Path], None] | None" = None,
     timeout: int = 120,
 ) -> Path:
     """SVG → EPS 10 CMYK (full): scrub fingerprint + preview + header Illustrator.
+
+    on_raw: hook dipanggil dengan path EPS MENTAH (PostScript gs polos) sebelum
+    spoof+wrap. Dipakai untuk embed metadata XMP — exiftool MENOLAK menulis XMP
+    ke file yang sudah ber-header Illustrator, jadi metadata harus masuk di sini.
+    XMP packet jatuh di body (setelah %%EndComments) sehingga selamat dari
+    header-rewrite & DOS-EPS wrapping.
 
     embed_preview/spoof_header bisa dimatikan untuk debugging/perbandingan.
     """
@@ -221,6 +229,9 @@ def generate(
         raw_eps = tdp / (svg.stem + ".raw.eps")
         svg_to_pdf(svg, pdf, timeout=timeout)
         pdf_to_cmyk_eps(pdf, raw_eps, icc_profile=icc_profile, timeout=timeout)
+
+        if on_raw is not None:
+            on_raw(raw_eps)  # embed metadata ke EPS mentah (exiftool OK di sini)
 
         ps_bytes = raw_eps.read_bytes()
         if spoof_header:

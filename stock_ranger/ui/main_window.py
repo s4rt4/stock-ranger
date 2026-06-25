@@ -1,7 +1,7 @@
-"""MainWindow — toolbar atas, collapsible sidebar, area tengah, log panel, statusbar.
+"""MainWindow — layout ala Adobe Bridge.
 
-Fase 2: drag&drop, live preview + gamut, metadata template, manual JPG import,
-log panel.
+Kiri: folder tree (filesystem). Tengah: content grid thumbnail. Kanan: inspector
+(File Properties + Metadata + Export). Bawah: log panel + statusbar.
 """
 
 from __future__ import annotations
@@ -9,30 +9,29 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QAction, QPixmap
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QPlainTextEdit,
     QProgressBar,
-    QScrollArea,
     QSizePolicy,
+    QSlider,
+    QSplitter,
     QToolBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ..core import profile_manager
-from ..core.models import JpgMode, Metadata, OutputSettings
+from ..core.models import JpgMode, OutputSettings
 from . import icons
-from .panels import MetadataCard, OutputCard, PreviewCard
-from .preview_worker import PreviewWorker
-from .sidebar import Sidebar
+from .browser import ContentGrid, FolderTree
+from .inspector import Inspector
 from .theme import Color, stylesheet
+from .thumbnails import SVG_EXT
 from .worker import PipelineWorker
 
 
@@ -40,23 +39,18 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Stock Ranger")
-        self.resize(1200, 840)
-        self.setMinimumSize(900, 560)
+        self.resize(1320, 860)
+        self.setMinimumSize(1000, 600)
         self.setStyleSheet(stylesheet())
-        self.setAcceptDrops(True)
 
-        self._manual_jpgs: dict[str, Path] = {}
-        self._preview_path: str | None = None
-        self._preview_worker: PreviewWorker | None = None
         self._worker: PipelineWorker | None = None
+        self._current_folder: Path | None = None
 
         self._build_toolbar()
         self._build_body()
         self._build_statusbar()
 
-        self.metadata.refresh_templates()
-        self.sidebar.queue.currentItemChanged.connect(self._on_queue_selection)
-        self.sidebar.profile_combo.currentIndexChanged.connect(self._reload_preview)
+        self.tree.reveal(Path.home())
 
     # ---------- toolbar ----------
     def _build_toolbar(self):
@@ -64,16 +58,11 @@ class MainWindow(QMainWindow):
         tb.setObjectName("topbar")
         tb.setMovable(False)
         tb.setIconSize(QSize(20, 20))
-        tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
-
-        self.menu_action = QAction(icons.icon("menu", Color.ICON, 20), "Toggle sidebar", self)
-        self.menu_action.triggered.connect(self._toggle_sidebar)
-        tb.addAction(self.menu_action)
 
         brand = QWidget()
         bl = QHBoxLayout(brand)
-        bl.setContentsMargins(8, 0, 8, 0)
+        bl.setContentsMargins(8, 0, 12, 0)
         bl.setSpacing(2)
         name = QLabel("Stock Ranger")
         name.setObjectName("brand")
@@ -84,25 +73,35 @@ class MainWindow(QMainWindow):
         tb.addWidget(brand)
         tb.addWidget(self._vsep())
 
-        self._add_tool(tb, "file-plus", "Add SVG", self._add_files)
-        self._add_tool(tb, "image-import", "Import JPG (mode manual)", self._import_jpgs)
-        self._add_tool(tb, "trash", "Remove selected", self._remove_files)
+        # breadcrumb path
+        self.path_label = QLabel("")
+        self.path_label.setStyleSheet(f"color:{Color.TEXT_DIM};font-size:12px;padding:0 6px;")
+        tb.addWidget(self.path_label)
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         tb.addWidget(spacer)
 
-        self.log_action = self._add_tool(tb, "list", "Toggle log panel", self._toggle_log, checkable=True)
-        self._add_tool(tb, "settings", "Settings", None)
-        self._add_tool(tb, "info", "About", None)
+        # thumbnail size slider
+        zo = QLabel()
+        zo.setPixmap(icons.pixmap("image", Color.ICON, 16))
+        tb.addWidget(zo)
+        self.thumb_slider = QSlider(Qt.Orientation.Horizontal)
+        self.thumb_slider.setRange(96, 320)
+        self.thumb_slider.setValue(150)
+        self.thumb_slider.setFixedWidth(120)
+        self.thumb_slider.valueChanged.connect(self._on_thumb_size)
+        tb.addWidget(self.thumb_slider)
         tb.addWidget(self._vsep())
+
+        self.log_action = self._add_tool(tb, "list", "Toggle log panel", self._toggle_log, checkable=True)
 
         cta = QWidget()
         cl = QHBoxLayout(cta)
-        cl.setContentsMargins(2, 0, 2, 0)
+        cl.setContentsMargins(6, 0, 2, 0)
         self.cta_btn = QToolButton()
         self.cta_btn.setObjectName("cta")
-        self.cta_btn.setText("  Process  •  ZIP")
+        self.cta_btn.setText("  Process  ")
         self.cta_btn.setIcon(icons.icon("zap", "#08240f", 18))
         self.cta_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.cta_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -110,7 +109,7 @@ class MainWindow(QMainWindow):
         cl.addWidget(self.cta_btn)
         tb.addWidget(cta)
 
-    def _add_tool(self, tb: QToolBar, icon_name: str, tip: str, slot, checkable=False):
+    def _add_tool(self, tb, icon_name, tip, slot, checkable=False):
         act = QAction(icons.icon(icon_name, Color.ICON, 20), tip, self)
         act.setToolTip(tip)
         act.setCheckable(checkable)
@@ -130,63 +129,46 @@ class MainWindow(QMainWindow):
     def _build_body(self):
         central = QWidget()
         central.setObjectName("root")
-        h = QHBoxLayout(central)
-        h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(0)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        self.sidebar = Sidebar()
-        self.sidebar.addRequested.connect(self._add_files)
-        self.sidebar.removeRequested.connect(self._remove_files)
-        h.addWidget(self.sidebar)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setObjectName("mainSplit")
+        self.splitter.setHandleWidth(1)
 
-        content = QWidget()
-        cv = QVBoxLayout(content)
-        cv.setContentsMargins(18, 18, 18, 18)
-        cv.setSpacing(16)
+        self.tree = FolderTree()
+        self.tree.folderSelected.connect(self._on_folder)
 
-        self.preview = PreviewCard()
-        self.metadata = MetadataCard()
-        self.output = OutputCard()
-        self.output.processRequested.connect(self._process)
+        self.grid = ContentGrid()
+        self.grid.selectionChangedFiles.connect(self._on_grid_selection)
 
-        cv.addWidget(self.preview)
-        cv.addWidget(self.metadata)
-        cv.addWidget(self.output)
-        cv.addStretch(1)
+        self.inspector = Inspector()
+        self.inspector.processRequested.connect(self._process)
 
-        scroll = QScrollArea()
-        scroll.setWidget(content)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(
-            "QScrollArea{background:transparent;} "
-            "QScrollArea > QWidget > QWidget{background:transparent;}"
-        )
+        self.splitter.addWidget(self.tree)
+        self.splitter.addWidget(self.grid)
+        self.splitter.addWidget(self.inspector)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
+        self.splitter.setSizes([240, 720, 360])
 
-        # Kolom kanan: konten (atas) + log panel (bawah, collapsible)
-        right = QWidget()
-        rv = QVBoxLayout(right)
-        rv.setContentsMargins(0, 0, 0, 0)
-        rv.setSpacing(0)
-        rv.addWidget(scroll, 1)
-        rv.addWidget(self._build_log_panel())
-        h.addWidget(right, 1)
-
+        outer.addWidget(self.splitter, 1)
+        outer.addWidget(self._build_log_panel())
         self.setCentralWidget(central)
 
     def _build_log_panel(self) -> QWidget:
         self.log_panel = QFrame()
         self.log_panel.setObjectName("logPanel")
         self.log_panel.setVisible(False)
-        self.log_panel.setFixedHeight(170)
+        self.log_panel.setFixedHeight(150)
         self.log_panel.setStyleSheet(
             f"QFrame#logPanel{{background:{Color.SURFACE};border-top:1px solid {Color.BORDER};}}"
         )
         v = QVBoxLayout(self.log_panel)
         v.setContentsMargins(14, 8, 14, 10)
         v.setSpacing(6)
-
         head = QHBoxLayout()
         ic = QLabel()
         ic.setPixmap(icons.pixmap("list", Color.TEXT_DIM, 14))
@@ -197,13 +179,11 @@ class MainWindow(QMainWindow):
         head.addStretch(1)
         clear = QToolButton()
         clear.setIcon(icons.icon("x", Color.TEXT_DIM, 14))
-        clear.setToolTip("Bersihkan log")
         clear.setCursor(Qt.CursorShape.PointingHandCursor)
         clear.setStyleSheet("QToolButton{border:none;background:transparent;}")
         clear.clicked.connect(lambda: self._log_view.clear())
         head.addWidget(clear)
         v.addLayout(head)
-
         self._log_view = QPlainTextEdit()
         self._log_view.setReadOnly(True)
         self._log_view.setStyleSheet(
@@ -217,7 +197,7 @@ class MainWindow(QMainWindow):
         sb = self.statusBar()
         self._status_icon = QLabel()
         self._status_icon.setPixmap(icons.pixmap("check", Color.SUCCESS, 14))
-        self._status_text = QLabel("Ready — 0 file di queue")
+        self._status_text = QLabel("Pilih folder berisi SVG di kiri")
         self._status_text.setStyleSheet(f"color:{Color.TEXT_DIM};")
         sb.addWidget(self._status_icon)
         sb.addWidget(self._status_text)
@@ -236,139 +216,70 @@ class MainWindow(QMainWindow):
         deps.setStyleSheet(f"color:{Color.TEXT_FAINT};font-size:11px;")
         sb.addPermanentWidget(deps)
 
-    # ---------- drag & drop ----------
-    def _svgs_in(self, mime) -> list[str]:
-        if not mime.hasUrls():
-            return []
-        return [
-            u.toLocalFile()
-            for u in mime.urls()
-            if u.toLocalFile().lower().endswith(".svg")
-        ]
+    # ---------- events ----------
+    def _on_folder(self, folder: Path):
+        self._current_folder = folder
+        self.path_label.setText(str(folder))
+        self.grid.load_folder(folder)
+        n_svg = len(self.grid.all_files(SVG_EXT))
+        self._set_status("check", Color.SUCCESS, f"{folder.name} — {n_svg} SVG")
 
-    def dragEnterEvent(self, e):  # noqa: N802
-        if self._svgs_in(e.mimeData()):
-            e.acceptProposedAction()
+    def _on_grid_selection(self, files: list[Path]):
+        if not files:
+            self.inspector.show_file(None, 0)
+        else:
+            self.inspector.show_file(files[0], len(files))
 
-    def dropEvent(self, e):  # noqa: N802
-        svgs = self._svgs_in(e.mimeData())
-        for p in svgs:
-            self.sidebar.add_file(Path(p).name, p)
-        if svgs:
-            self._update_status()
-            self._log(f"Drag & drop: {len(svgs)} SVG ditambahkan")
-            e.acceptProposedAction()
-
-    # ---------- actions ----------
-    def _toggle_sidebar(self):
-        self.sidebar.toggle()
+    def _on_thumb_size(self, size: int):
+        self.grid.set_thumb_size(size)
 
     def _toggle_log(self):
         self.log_panel.setVisible(self.log_action.isChecked())
 
-    def _add_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "Pilih file SVG", str(Path.home()), "SVG files (*.svg)"
-        )
-        for p in paths:
-            self.sidebar.add_file(Path(p).name, p)
-        if paths:
-            self._update_status()
-            self._log(f"Ditambahkan {len(paths)} SVG ke queue")
-
-    def _import_jpgs(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "Pilih JPG untuk dipasangkan", str(Path.home()), "JPEG (*.jpg *.jpeg)"
-        )
-        if not paths:
-            return
-        svg_stems = {Path(p).stem for p in self.sidebar.file_paths()}
-        matched = 0
-        for p in paths:
-            stem = Path(p).stem
-            if stem in svg_stems:
-                self._manual_jpgs[stem] = Path(p)
-                matched += 1
-        self.sidebar.jpgmode_combo.setCurrentIndex(1)  # aktifkan mode manual
-        self._log(f"Import JPG: {matched}/{len(paths)} cocok dengan SVG di queue")
-        missing = sorted(svg_stems - set(self._manual_jpgs))
-        if missing:
-            self._log(
-                f"⚠ {len(missing)} SVG belum berpasangan JPG: "
-                f"{', '.join(missing[:6])}{'…' if len(missing) > 6 else ''}"
-            )
-
-    def _remove_files(self):
-        for item in self.sidebar.queue.selectedItems():
-            stem = Path(item.data(Qt.ItemDataRole.UserRole) or "").stem
-            self._manual_jpgs.pop(stem, None)
-            self.sidebar.queue.takeItem(self.sidebar.queue.row(item))
-        self._update_status()
-
-    # ---------- live preview ----------
-    def _on_queue_selection(self, current, _previous):
-        if current is None:
-            self.preview.clear()
-            self._preview_path = None
-            return
-        path = current.data(Qt.ItemDataRole.UserRole)
-        if path:
-            self._start_preview(Path(path))
-
-    def _reload_preview(self):
-        if self._preview_path:
-            self._start_preview(Path(self._preview_path))
-
-    def _start_preview(self, svg: Path):
-        self.preview.set_loading()
-        self._preview_path = str(svg)
-        prefer_swop = self.sidebar.profile_combo.currentIndex() == 0
-        icc = profile_manager.resolve_profile(prefer_swop)  # tidak men-download
-        self._preview_worker = PreviewWorker(svg, icc)
-        self._preview_worker.ready.connect(self._on_preview_ready)
-        self._preview_worker.failed.connect(self._on_preview_failed)
-        self._preview_worker.start()
-
-    def _on_preview_ready(self, rgb_qimg, cmyk_qimg, gamut: int, path: str):
-        if path != self._preview_path:
-            return  # hasil basi (user sudah pindah file)
-        self.preview.set_images(QPixmap.fromImage(rgb_qimg), QPixmap.fromImage(cmyk_qimg))
-        self.preview.set_gamut(gamut)
-
-    def _on_preview_failed(self, err: str, path: str):
-        if path != self._preview_path:
-            return
-        self.preview.rgb_box.set_text("preview gagal")
-        self.preview.cmyk_box.set_text(err[:48])
-
     # ---------- processing ----------
+    def _target_svgs(self) -> list[Path]:
+        """SVG terpilih; jika tak ada seleksi → semua SVG di folder."""
+        sel = [p for p in self.grid.selected_files() if p.suffix.lower() in SVG_EXT]
+        return sel or self.grid.all_files(SVG_EXT)
+
     def _process(self):
-        paths = [Path(p) for p in self.sidebar.file_paths()]
-        if not paths:
-            self._set_status("alert", Color.WARNING, "Queue kosong — tambahkan SVG dulu")
+        svgs = self._target_svgs()
+        if not svgs:
+            self._set_status("alert", Color.WARNING, "Tidak ada SVG untuk diproses")
             return
 
-        meta = self.metadata.get_metadata()
+        meta = self.inspector.metadata.get_metadata()
+        ins = self.inspector
         settings = OutputSettings(
-            out_dir=Path(self.output.path_edit.text().strip() or "~/StockRanger/output"),
-            jpg_width=self.output.w_spin.value(),
-            jpg_height=self.output.h_spin.value(),
-            dpi=self.output.dpi_spin.value(),
-            jpg_mode=(
-                JpgMode.AUTO
-                if self.sidebar.jpgmode_combo.currentIndex() == 0
-                else JpgMode.MANUAL
-            ),
+            out_dir=Path(ins.path_edit.text().strip() or "~/StockRanger/output"),
+            output_mode=ins.mode_combo.currentData(),
+            jpg_rule=ins.rule_combo.currentData(),
+            jpg_value=ins.size_spin.value(),
+            dpi=ins.dpi_spin.value(),
+            jpg_quality=ins.q_spin.value(),
+            jpg_mode=JpgMode.AUTO,
         )
-        prefer_swop = self.sidebar.profile_combo.currentIndex() == 0
+
+        # Auto-pair JPG sibling (nama sama) di folder yang sama → mode manual.
+        manual: dict[str, Path] = {}
+        if self._current_folder:
+            for svg in svgs:
+                for ext in (".jpg", ".jpeg"):
+                    cand = svg.with_suffix(ext)
+                    if cand.exists():
+                        manual[svg.stem] = cand
+                        break
+        if manual:
+            settings.jpg_mode = JpgMode.MANUAL
 
         self.log_action.setChecked(True)
         self.log_panel.setVisible(True)
         self._set_processing(True)
-        self._set_status("zap", Color.ACCENT, f"Memproses {len(paths)} file…")
-        self._log(f"▶ Mulai memproses {len(paths)} file…")
+        self._set_status("zap", Color.ACCENT, f"Memproses {len(svgs)} SVG…")
+        self._log(f"▶ Mulai {len(svgs)} SVG · mode={settings.output_mode.value} · "
+                  f"jpg={settings.jpg_rule.value}={settings.jpg_value}")
 
-        self._worker = PipelineWorker(paths, meta, settings, prefer_swop, dict(self._manual_jpgs))
+        self._worker = PipelineWorker(svgs, meta, settings, prefer_swop=False, manual_jpgs=manual)
         self._worker.logLine.connect(self._log)
         self._worker.progressed.connect(self._progress.setValue)
         self._worker.done.connect(self._on_done)
@@ -378,15 +289,17 @@ class MainWindow(QMainWindow):
         self._progress.setVisible(active)
         self._progress.setValue(0)
         self.cta_btn.setEnabled(not active)
-        self.output.process_btn.setEnabled(not active)
+        self.inspector.process_btn.setEnabled(not active)
 
     def _on_done(self, ok: int, total: int):
         self._set_processing(False)
+        if self._current_folder:
+            self.grid.load_folder(self._current_folder)  # refresh thumbnail output baru
         if ok == total:
-            self._set_status("check", Color.SUCCESS, f"Selesai — {ok}/{total} file → ZIP siap upload")
+            self._set_status("check", Color.SUCCESS, f"Selesai — {ok}/{total} sukses")
             self._log(f"✓ Selesai — {ok}/{total} sukses")
         else:
-            self._set_status("alert", Color.WARNING, f"Selesai dengan error — {ok}/{total} sukses")
+            self._set_status("alert", Color.WARNING, f"Selesai dengan error — {ok}/{total}")
             self._log(f"⚠ Selesai — {ok}/{total} sukses (ada error)")
 
     # ---------- helpers ----------
@@ -400,10 +313,6 @@ class MainWindow(QMainWindow):
             color = Color.WARNING
         self._log_view.appendHtml(f"<span style='color:{color};'>{msg}</span>")
         self.statusBar().showMessage(msg, 4000)
-
-    def _update_status(self):
-        n = self.sidebar.queue.count()
-        self._set_status("check", Color.SUCCESS, f"Ready — {n} file di queue")
 
     def _set_status(self, icon_name: str, color: str, text: str):
         self._status_icon.setPixmap(icons.pixmap(icon_name, color, 14))

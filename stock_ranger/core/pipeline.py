@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import eps_generator, jpg_generator, metadata_writer, profile_manager, svg_parser, zip_builder
-from .models import JobResult, JpgMode, Metadata, OutputSettings
+from .models import JobResult, JpgMode, Metadata, OutputMode, OutputSettings
 
 # Callback log: (pesan) -> None
 LogFn = Callable[[str], None]
@@ -55,43 +55,49 @@ def process_one(
             return result
         result.warnings.extend(info.warnings)
 
-        # 2. EPS 10 CMYK
-        step(2, "generate EPS 10 CMYK…")
+        # 2. EPS 10 CMYK — metadata XMP di-embed ke EPS MENTAH via on_raw hook
+        #    (exiftool menolak XMP ke EPS ber-header Illustrator → harus pre-spoof)
+        step(2, "generate EPS 10 CMYK + metadata…")
         eps = out_dir / f"{svg.stem}.eps"
-        eps_generator.generate(svg, eps, icc_profile=icc)
+        eps_generator.generate(
+            svg, eps, icc_profile=icc,
+            on_raw=lambda raw: metadata_writer.embed(raw, meta),
+        )
         if not eps_generator.is_cmyk_eps(eps):
             result.warnings.append("EPS tidak terdeteksi CMYK (cek profile)")
         result.eps_path = eps
 
-        # 3. JPG preview
-        step(3, "generate JPG preview…")
-        jpg = out_dir / f"{svg.stem}.jpg"
-        if settings.jpg_mode == JpgMode.MANUAL and manual_jpg:
-            jpg_generator.import_existing(manual_jpg, jpg, quality=settings.jpg_quality)
-        elif settings.jpg_mode == JpgMode.MANUAL:
-            result.warnings.append("Mode manual tapi JPG tak ditemukan — rasterize otomatis")
-            jpg_generator.rasterize(
-                svg, jpg,
-                width=settings.jpg_width, height=settings.jpg_height,
-                dpi=settings.dpi, quality=settings.jpg_quality,
-            )
-        else:
-            jpg_generator.rasterize(
-                svg, jpg,
-                width=settings.jpg_width, height=settings.jpg_height,
-                dpi=settings.dpi, quality=settings.jpg_quality,
-            )
-        result.jpg_path = jpg
+        # 3. JPG (lewati untuk mode EPS_ONLY / Kel.1)
+        jpg: Path | None = None
+        if settings.needs_jpg:
+            step(3, "generate JPG…")
+            jpg = out_dir / f"{svg.stem}.jpg"
+            if settings.jpg_mode == JpgMode.MANUAL and manual_jpg:
+                jpg_generator.import_existing(
+                    manual_jpg, jpg,
+                    rule=settings.jpg_rule, value=settings.jpg_value,
+                    quality=settings.jpg_quality,
+                )
+            else:
+                if settings.jpg_mode == JpgMode.MANUAL:
+                    result.warnings.append("Mode manual tapi JPG tak ditemukan — rasterize otomatis")
+                jpg_generator.rasterize(
+                    svg, jpg,
+                    rule=settings.jpg_rule, value=settings.jpg_value,
+                    dpi=settings.dpi, quality=settings.jpg_quality,
+                )
+            result.jpg_path = jpg
 
-        # 4. Embed metadata ke EPS & JPG
-        step(4, "embed metadata XMP/IPTC…")
-        metadata_writer.embed(eps, meta)
-        metadata_writer.embed(jpg, meta)
+        # 4. Embed metadata ke JPG (EPS sudah di-embed di step 2 via on_raw) — SAMA
+        if jpg is not None:
+            step(4, "embed metadata XMP/IPTC…")
+            metadata_writer.embed(jpg, meta)
 
-        # 5. ZIP
-        step(5, "build ZIP…")
-        if settings.zip_per_pair:
+        # 5. Paket sesuai output_mode
+        step(5, "paket output…")
+        if settings.output_mode == OutputMode.PAIR_ZIP and jpg is not None:
             result.zip_path = zip_builder.build_pair_zip(eps, jpg, out_dir)
+        # EPS_ONLY & PAIR_LOOSE → file dibiarkan loose di out_dir
         result.ok = True
         log(f"[{svg.name}] ✓ selesai")
     except Exception as e:  # noqa: BLE001 — kumpulkan error per-file, jangan hentikan batch
@@ -124,17 +130,6 @@ def process_batch(
                 manual_jpg=manual_jpgs.get(Path(svg).stem),
             )
         )
-    # Batch ZIP gabungan jika diminta
-    if not settings.zip_per_pair and any(r.ok for r in results):
-        files: list[Path] = []
-        for r in results:
-            if r.eps_path:
-                files.append(r.eps_path)
-            if r.jpg_path:
-                files.append(r.jpg_path)
-        out_dir = Path(settings.out_dir).expanduser()
-        bundle = zip_builder.build_zip(files, out_dir / "StockRanger_batch.zip")
-        log(f"Batch ZIP: {bundle.name} ({len(files)} file)")
     return results
 
 

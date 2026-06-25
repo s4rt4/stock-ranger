@@ -194,4 +194,77 @@ def stylesheet() -> str:
         border-radius: 6px;
         padding: 5px 8px;
     }}
+
+    /* ---------- Bridge: splitter ---------- */
+    QSplitter#mainSplit::handle {{ background: {c.BORDER}; }}
+
+    /* ---------- Bridge: folder tree (kiri) ---------- */
+    QTreeView#folderTree {{
+        background: {c.SURFACE};
+        border: none;
+        border-right: 1px solid {c.BORDER};
+        padding: 6px 4px;
+        show-decoration-selected: 1;
+    }}
+    QTreeView#folderTree::item {{
+        padding: 4px 2px;
+        border-radius: 6px;
+        color: {c.TEXT_DIM};
+    }}
+    QTreeView#folderTree::item:hover {{ background: {c.SURFACE_2}; color: {c.TEXT}; }}
+    QTreeView#folderTree::item:selected {{ background: {c.ACCENT_SOFT}; color: {c.TEXT}; }}
+
+    /* ---------- Bridge: content grid (tengah) ---------- */
+    QListWidget#contentGrid {{
+        background: {c.BG};
+        border: none;
+        padding: 12px;
+    }}
+    QListWidget#contentGrid::item {{
+        color: {c.TEXT_DIM};
+        border: 1px solid transparent;
+        border-radius: 8px;
+        padding: 6px 4px;
+    }}
+    QListWidget#contentGrid::item:hover {{ background: {c.SURFACE}; }}
+    QListWidget#contentGrid::item:selected {{
+        background: {c.ACCENT_SOFT};
+        border: 1px solid {c.ACCENT};
+        color: {c.TEXT};
+    }}
+
+    /* ---------- Bridge: inspector (kanan) ---------- */
+    QTabWidget#inspector {{ background: {c.SURFACE}; }}
+    QTabWidget#inspector::pane {{
+        background: {c.SURFACE};
+        border: none;
+        border-left: 1px solid {c.BORDER};
+    }}
+    QTabWidget#inspector QTabBar::tab {{
+        background: {c.SURFACE};
+        color: {c.TEXT_FAINT};
+        padding: 8px 16px;
+        border: none;
+        border-bottom: 2px solid transparent;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    QTabWidget#inspector QTabBar::tab:selected {{
+        color: {c.TEXT};
+        border-bottom: 2px solid {c.ACCENT};
+    }}
+    QTabWidget#inspector QTabBar::tab:hover {{ color: {c.TEXT_DIM}; }}
+    QFrame#propsBox {{
+        background: {c.SURFACE_2};
+        border: 1px solid {c.BORDER_SOFT};
+        border-radius: 10px;
+    }}
+
+    /* ---------- Slider ---------- */
+    QSlider::groove:horizontal {{ height: 4px; background: {c.SURFACE_3}; border-radius: 2px; }}
+    QSlider::handle:horizontal {{
+        background: {c.ACCENT}; width: 14px; height: 14px;
+        margin: -6px 0; border-radius: 7px;
+    }}
+    QSlider::handle:horizontal:hover {{ background: {c.ACCENT_HOVER}; }}
     """

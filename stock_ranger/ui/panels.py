@@ -166,7 +166,7 @@ class MetadataCard(QFrame):
 
         # Template preset controls
         self.tpl_combo = QComboBox()
-        self.tpl_combo.setMinimumWidth(150)
+        self.tpl_combo.setMinimumWidth(90)
         self.tpl_combo.setToolTip("Muat metadata template")
         self.tpl_combo.activated.connect(self._load_selected_template)
         save_tpl = QToolButton()

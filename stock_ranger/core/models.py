@@ -12,6 +12,21 @@ class JpgMode(str, Enum):
     MANUAL = "manual"   # pakai JPG existing yang di-pair
 
 
+class OutputMode(str, Enum):
+    """Mode paket output sesuai kebijakan microstock."""
+
+    EPS_ONLY = "eps_only"      # Kel.1: cuma EPS + metadata
+    PAIR_LOOSE = "pair_loose"  # Kel.2: EPS + JPG (nama+metadata sama), tanpa zip
+    PAIR_ZIP = "pair_zip"      # Kel.3: EPS + JPG di-zip per pasangan
+
+
+class JpgSizeRule(str, Enum):
+    """Aturan ukuran JPG — selalu JAGA aspect ratio (tidak distorsi)."""
+
+    LONGEST_SIDE = "longest_side"      # value = px sisi terpanjang
+    MAX_MEGAPIXELS = "max_megapixels"  # value = batas megapixel
+
+
 @dataclass
 class Metadata:
     """Metadata Shutterstock — di-embed ke EPS & JPG."""
@@ -35,13 +50,17 @@ class Metadata:
 @dataclass
 class OutputSettings:
     out_dir: Path = Path.home() / "StockRanger" / "output"
-    jpg_width: int = 4000
-    jpg_height: int = 4000
+    output_mode: OutputMode = OutputMode.PAIR_ZIP
+    jpg_rule: JpgSizeRule = JpgSizeRule.LONGEST_SIDE
+    jpg_value: int = 4000           # px (LONGEST_SIDE) atau MP (MAX_MEGAPIXELS)
     dpi: int = 300
     jpg_quality: int = 92
     jpg_mode: JpgMode = JpgMode.AUTO
-    zip_per_pair: bool = True       # satu ZIP per pasangan
     icc_profile: Path | None = None  # None → resolusi otomatis (SWOP / gs default)
+
+    @property
+    def needs_jpg(self) -> bool:
+        return self.output_mode != OutputMode.EPS_ONLY
 
 
 @dataclass
