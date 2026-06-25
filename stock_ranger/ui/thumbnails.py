@@ -1,10 +1,14 @@
-"""Render thumbnail file (SVG/EPS/JPG/PNG/PDF) ke QPixmap untuk content grid.
+"""Render thumbnail file (SVG/EPS/JPG/PNG/PDF) untuk content grid.
+
+PENTING: render menghasilkan QImage (BUKAN QPixmap). QPixmap tidak aman dibuat di
+luar GUI thread; loader bekerja di QThread, jadi semua di sini pakai QImage dan
+konversi ke QPixmap dilakukan di GUI thread (lihat ContentGrid._set_thumb).
 
 - SVG  : QtSvg (cepat, tanpa Inkscape).
-- JPG/PNG: QPixmap langsung.
-- EPS  : ekstrak embedded TIFF preview (DOS-EPS wrapper C5D0D3C6) via PIL bila ada,
-         jika tidak → placeholder berlabel.
-- Loader async (QThread) supaya buka folder besar tidak membekukan UI.
+- JPG/PNG: QImage langsung.
+- EPS  : ekstrak embedded TIFF preview (DOS-EPS wrapper) via PIL; jika gagal
+         (mis. EPS Adobe offset absolut) → fallback render Ghostscript; lalu placeholder.
+- Badge format (EPS/JPG/…) digambar di pojok tiap thumbnail.
 """
 
 from __future__ import annotations
@@ -12,11 +16,11 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-from PyQt6.QtCore import QRect, QRectF, QSize, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPixmap
+from PyQt6.QtCore import QRect, QRectF, Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QFontMetrics, QImage, QPainter
 from PyQt6.QtSvg import QSvgRenderer
 
-from .imageconv import pil_to_qpixmap
+from .imageconv import pil_to_qimage
 from .theme import Color
 
 RASTER_EXT = {".jpg", ".jpeg", ".png"}
@@ -26,13 +30,13 @@ VECTOR_EXT = {".pdf", ".ai"}
 SUPPORTED_EXT = RASTER_EXT | SVG_EXT | EPS_EXT | VECTOR_EXT
 
 
-def _canvas(size: int) -> QPixmap:
-    pix = QPixmap(size, size)
-    pix.fill(QColor(0, 0, 0, 0))
-    return pix
+def _canvas(size: int) -> QImage:
+    img = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(QColor(0, 0, 0, 0))
+    return img
 
 
-def _fit_onto(src: QPixmap, size: int, *, bg: str | None = "#ffffff") -> QPixmap:
+def _fit_onto(src: QImage, size: int, *, bg: str | None = "#ffffff") -> QImage:
     """Scale src jaga aspect, taruh di tengah kanvas size×size (opsional bg)."""
     canvas = _canvas(size)
     p = QPainter(canvas)
@@ -46,12 +50,12 @@ def _fit_onto(src: QPixmap, size: int, *, bg: str | None = "#ffffff") -> QPixmap
     )
     x = (size - scaled.width()) // 2
     y = (size - scaled.height()) // 2
-    p.drawPixmap(x, y, scaled)
+    p.drawImage(x, y, scaled)
     p.end()
     return canvas
 
 
-def _placeholder(label: str, size: int) -> QPixmap:
+def _placeholder(label: str, size: int) -> QImage:
     canvas = _canvas(size)
     p = QPainter(canvas)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -66,7 +70,7 @@ def _placeholder(label: str, size: int) -> QPixmap:
     return canvas
 
 
-def _render_eps_via_gs(path: Path, size: int) -> QPixmap | None:
+def _render_eps_via_gs(path: Path, size: int) -> QImage | None:
     """Fallback EPS thumbnail: render via Ghostscript (untuk EPS Adobe yang
     preview TIFF-nya pakai offset absolut → tak terbaca PIL)."""
     import shutil
@@ -84,7 +88,7 @@ def _render_eps_via_gs(path: Path, size: int) -> QPixmap | None:
                 capture_output=True, timeout=20,
             )
             if png.exists():
-                src = QPixmap(str(png))
+                src = QImage(str(png))
                 if not src.isNull():
                     return _fit_onto(src, size)
     except Exception:
@@ -92,7 +96,7 @@ def _render_eps_via_gs(path: Path, size: int) -> QPixmap | None:
     return None
 
 
-def _extract_eps_preview(path: Path) -> QPixmap | None:
+def _extract_eps_preview(path: Path) -> QImage | None:
     """Ambil embedded TIFF preview dari DOS-EPS wrapper (C5D0D3C6)."""
     try:
         with open(path, "rb") as f:
@@ -108,7 +112,7 @@ def _extract_eps_preview(path: Path) -> QPixmap | None:
 
         from PIL import Image
         im = Image.open(BytesIO(tiff)).convert("RGB")
-        return pil_to_qpixmap(im)
+        return pil_to_qimage(im)
     except Exception:
         return None
 
@@ -120,11 +124,11 @@ _BADGE_COLORS = {
 }
 
 
-def _draw_badge(pm: QPixmap, ext: str, size: int) -> QPixmap:
+def _draw_badge(img: QImage, ext: str, size: int) -> QImage:
     """Gambar badge format (mis. EPS/JPG) di pojok kiri-bawah thumbnail."""
     label = ext.upper()
     color = _BADGE_COLORS.get(ext, "#646c7c")
-    p = QPainter(pm)
+    p = QPainter(img)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     f = p.font()
     f.setBold(True)
@@ -142,17 +146,17 @@ def _draw_badge(pm: QPixmap, ext: str, size: int) -> QPixmap:
     p.setPen(QColor("#ffffff"))
     p.drawText(QRect(x, y, bw, bh), Qt.AlignmentFlag.AlignCenter, label)
     p.end()
-    return pm
+    return img
 
 
-def render_thumbnail(path: Path, size: int) -> QPixmap:
-    """Render thumbnail + badge format. Dipanggil di worker thread."""
-    pm = _render_base(path, size)
-    return _draw_badge(pm, path.suffix.lower().lstrip("."), size)
+def render_thumbnail(path: Path, size: int) -> QImage:
+    """Render thumbnail + badge format → QImage. Aman dipanggil di worker thread."""
+    img = _render_base(path, size)
+    return _draw_badge(img, path.suffix.lower().lstrip("."), size)
 
 
-def _render_base(path: Path, size: int) -> QPixmap:
-    """Render isi thumbnail (tanpa badge)."""
+def _render_base(path: Path, size: int) -> QImage:
+    """Render isi thumbnail (tanpa badge) → QImage."""
     ext = path.suffix.lower()
     try:
         if ext in SVG_EXT:
@@ -172,7 +176,7 @@ def _render_base(path: Path, size: int) -> QPixmap:
                 return canvas
             return _placeholder("SVG", size)
         if ext in RASTER_EXT:
-            src = QPixmap(str(path))
+            src = QImage(str(path))
             if not src.isNull():
                 return _fit_onto(src, size, bg=Color.SURFACE_2)
             return _placeholder(ext[1:].upper(), size)
@@ -190,9 +194,9 @@ def _render_base(path: Path, size: int) -> QPixmap:
 
 
 class ThumbnailLoader(QThread):
-    """Render thumbnail daftar file di background, emit per-file."""
+    """Render thumbnail daftar file di background, emit QImage per-file."""
 
-    ready = pyqtSignal(int, QPixmap)  # (row, pixmap)
+    ready = pyqtSignal(int, QImage)  # (row, image)
 
     def __init__(self, files: list[Path], size: int, parent=None):
         super().__init__(parent)
@@ -207,10 +211,10 @@ class ThumbnailLoader(QThread):
         for row, path in enumerate(self._files):
             if self._stop:
                 return
-            pm = render_thumbnail(path, self._size)
+            img = render_thumbnail(path, self._size)
             if self._stop:
                 return
-            self.ready.emit(row, pm)
+            self.ready.emit(row, img)
 
 
-__all__ = ["render_thumbnail", "ThumbnailLoader", "SUPPORTED_EXT", "QSize"]
+__all__ = ["render_thumbnail", "ThumbnailLoader", "SUPPORTED_EXT", "SVG_EXT"]

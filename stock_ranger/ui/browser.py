@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QDir, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QFileSystemModel, QIcon
+from PyQt6.QtCore import QDir, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFileSystemModel, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QListWidget,
@@ -66,6 +66,10 @@ class ContentGrid(QListWidget):
         self._thumb = 150
         self._files: list[Path] = []
         self._loader: ThumbnailLoader | None = None
+        # Debounce re-render thumbnail saat slider digeser (hindari badai thread).
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._rerender)
 
         self.setViewMode(QListWidget.ViewMode.IconMode)
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
@@ -85,9 +89,14 @@ class ContentGrid(QListWidget):
         self.setGridSize(QSize(self._thumb + 34, self._thumb + 46))
 
     def set_thumb_size(self, size: int):
+        # Live: ubah ukuran icon (Qt men-scale pixmap lama) — murah, tak render ulang.
         self._thumb = size
         self._apply_sizes()
-        self.load_folder_files(self._files)  # re-render thumbnail
+        # Re-render thumbnail tajam hanya setelah slider berhenti ~180ms (debounce).
+        self._resize_timer.start(180)
+
+    def _rerender(self):
+        self.load_folder_files(self._files)
 
     # ---------- populate ----------
     def load_folder(self, folder: Path):
@@ -102,9 +111,7 @@ class ContentGrid(QListWidget):
         self.load_folder_files(files)
 
     def load_folder_files(self, files: list[Path]):
-        if self._loader:
-            self._loader.stop()
-            self._loader.wait(50)
+        self._retire_loader()
         self._files = files
         self.clear()
         for p in files:
@@ -114,13 +121,26 @@ class ContentGrid(QListWidget):
             it.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
             self.addItem(it)
         if files:
-            self._loader = ThumbnailLoader(files, self._thumb)
+            self._loader = ThumbnailLoader(files, self._thumb, parent=self)
             self._loader.ready.connect(self._set_thumb)
             self._loader.start()
 
-    def _set_thumb(self, row: int, pixmap):
+    def _retire_loader(self):
+        """Hentikan loader lama dengan aman (jangan sampai di-GC saat masih jalan)."""
+        lo = self._loader
+        self._loader = None
+        if lo is not None:
+            try:
+                lo.ready.disconnect(self._set_thumb)  # cegah emit basi ke item baru
+            except (TypeError, RuntimeError):
+                pass
+            lo.stop()
+            lo.finished.connect(lo.deleteLater)  # parent=self menjaga ref s/d selesai
+
+    def _set_thumb(self, row: int, image):
+        # Konversi QImage→QPixmap di GUI thread (QPixmap tak aman di worker thread).
         if 0 <= row < self.count():
-            self.item(row).setIcon(QIcon(pixmap))
+            self.item(row).setIcon(QIcon(QPixmap.fromImage(image)))
 
     def _emit_selection(self):
         self.selectionChangedFiles.emit(self.selected_files())
