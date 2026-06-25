@@ -260,6 +260,24 @@ def stylesheet() -> str:
         border-radius: 10px;
     }}
 
+    /* ---------- Export target rows ---------- */
+    QFrame#targetRow {{
+        background: {c.SURFACE_2};
+        border: 1px solid {c.BORDER_SOFT};
+        border-radius: 10px;
+    }}
+    QFrame#targetRow QLineEdit {{
+        background: {c.SURFACE};
+        font-weight: 600;
+    }}
+    QCheckBox::indicator {{
+        width: 16px; height: 16px;
+        border: 1px solid {c.BORDER}; border-radius: 5px; background: {c.SURFACE};
+    }}
+    QCheckBox::indicator:checked {{
+        background: {c.SUCCESS}; border-color: {c.SUCCESS};
+    }}
+
     /* ---------- Slider ---------- */
     QSlider::groove:horizontal {{ height: 4px; background: {c.SURFACE_3}; border-radius: 2px; }}
     QSlider::handle:horizontal {{

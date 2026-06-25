@@ -64,11 +64,39 @@ class OutputSettings:
 
 
 @dataclass
+class ExportTarget:
+    """Preset satu microstock — mode paket + aturan ukuran JPG."""
+
+    name: str
+    output_mode: OutputMode = OutputMode.PAIR_ZIP
+    jpg_rule: JpgSizeRule = JpgSizeRule.LONGEST_SIDE
+    jpg_value: int = 4000
+    jpg_quality: int = 92
+    enabled: bool = True
+
+    @property
+    def needs_jpg(self) -> bool:
+        return self.output_mode != OutputMode.EPS_ONLY
+
+    def summary(self) -> str:
+        mode = {
+            OutputMode.EPS_ONLY: "EPS",
+            OutputMode.PAIR_LOOSE: "EPS+JPG",
+            OutputMode.PAIR_ZIP: "ZIP(EPS+JPG)",
+        }[self.output_mode]
+        if self.output_mode == OutputMode.EPS_ONLY:
+            return mode
+        unit = "px" if self.jpg_rule == JpgSizeRule.LONGEST_SIDE else "MP"
+        return f"{mode} · {self.jpg_value}{unit}"
+
+
+@dataclass
 class JobResult:
     source: Path
     eps_path: Path | None = None
     jpg_path: Path | None = None
     zip_path: Path | None = None
+    outputs: dict[str, list[Path]] = field(default_factory=dict)  # target → files
     ok: bool = False
     error: str | None = None
     warnings: list[str] = field(default_factory=list)

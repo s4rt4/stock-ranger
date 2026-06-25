@@ -21,10 +21,77 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..core.models import JpgSizeRule, OutputMode
+from ..core import targets as targets_store
+from ..core.models import ExportTarget, JpgSizeRule, OutputMode
 from . import icons
 from .panels import MetadataCard
 from .theme import Color
+
+
+class TargetRow(QFrame):
+    """Satu baris preset microstock: checkbox + nama + mode + ukuran + hapus."""
+
+    changed = pyqtSignal()
+    deleted = pyqtSignal(object)
+
+    def __init__(self, target: ExportTarget, parent=None):
+        super().__init__(parent)
+        self.setObjectName("targetRow")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(10, 8, 10, 10)
+        v.setSpacing(7)
+
+        from PyQt6.QtWidgets import QCheckBox, QToolButton
+        top = QHBoxLayout()
+        top.setSpacing(7)
+        self.chk = QCheckBox()
+        self.chk.setChecked(target.enabled)
+        self.chk.toggled.connect(self.changed)
+        self.name = QLineEdit(target.name)
+        self.name.setPlaceholderText("Nama microstock…")
+        self.name.textChanged.connect(self.changed)
+        trash = QToolButton()
+        trash.setIcon(icons.icon("trash", Color.TEXT_DIM, 15))
+        trash.setCursor(Qt.CursorShape.PointingHandCursor)
+        trash.setStyleSheet("QToolButton{border:none;background:transparent;}")
+        trash.clicked.connect(lambda: self.deleted.emit(self))
+        top.addWidget(self.chk)
+        top.addWidget(self.name, 1)
+        top.addWidget(trash)
+        v.addLayout(top)
+
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self.mode = QComboBox()
+        self.mode.addItem("EPS", OutputMode.EPS_ONLY)
+        self.mode.addItem("EPS+JPG", OutputMode.PAIR_LOOSE)
+        self.mode.addItem("ZIP pair", OutputMode.PAIR_ZIP)
+        self.mode.setCurrentIndex([OutputMode.EPS_ONLY, OutputMode.PAIR_LOOSE,
+                                   OutputMode.PAIR_ZIP].index(target.output_mode))
+        self.mode.currentIndexChanged.connect(self.changed)
+        self.rule = QComboBox()
+        self.rule.addItem("px", JpgSizeRule.LONGEST_SIDE)
+        self.rule.addItem("MP", JpgSizeRule.MAX_MEGAPIXELS)
+        self.rule.setCurrentIndex(0 if target.jpg_rule == JpgSizeRule.LONGEST_SIDE else 1)
+        self.rule.currentIndexChanged.connect(self.changed)
+        self.val = QSpinBox()
+        self.val.setRange(1, 20000)
+        self.val.setValue(target.jpg_value)
+        self.val.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.val.valueChanged.connect(self.changed)
+        row.addWidget(self.mode, 2)
+        row.addWidget(self.val, 1)
+        row.addWidget(self.rule)
+        v.addLayout(row)
+
+    def to_target(self) -> ExportTarget:
+        return ExportTarget(
+            name=self.name.text().strip() or "Target",
+            output_mode=self.mode.currentData(),
+            jpg_rule=self.rule.currentData(),
+            jpg_value=self.val.value(),
+            enabled=self.chk.isChecked(),
+        )
 
 
 def _human_size(n: int) -> str:
@@ -135,53 +202,59 @@ class Inspector(QTabWidget):
 
     # ---------- Export tab ----------
     def _build_export_tab(self):
+        from PyQt6.QtWidgets import QToolButton
+
         wrap = QWidget()
         outer = QVBoxLayout(wrap)
         outer.setContentsMargins(14, 14, 14, 14)
-        outer.setSpacing(12)
+        outer.setSpacing(10)
 
-        # Output mode (Kel.1/2/3)
-        outer.addWidget(self._lbl("Output Mode"))
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("EPS saja (+metadata)", OutputMode.EPS_ONLY)
-        self.mode_combo.addItem("EPS + JPG (loose, nama sama)", OutputMode.PAIR_LOOSE)
-        self.mode_combo.addItem("EPS + JPG di-ZIP per pasangan", OutputMode.PAIR_ZIP)
-        self.mode_combo.setCurrentIndex(2)
-        outer.addWidget(self.mode_combo)
+        # Header target + tombol tambah
+        head = QHBoxLayout()
+        h = self._lbl("EXPORT TARGETS")
+        h.setProperty("class", "cardTitle")
+        head.addWidget(h)
+        head.addStretch(1)
+        add = QToolButton()
+        add.setIcon(icons.icon("add", Color.ICON, 16))
+        add.setToolTip("Tambah target")
+        add.setCursor(Qt.CursorShape.PointingHandCursor)
+        add.setStyleSheet(
+            f"QToolButton{{background:{Color.SURFACE_2};border:1px solid {Color.BORDER};"
+            f"border-radius:7px;padding:4px;}}QToolButton:hover{{border-color:{Color.ACCENT};}}"
+        )
+        add.clicked.connect(self._add_target)
+        head.addWidget(add)
+        outer.addLayout(head)
 
-        # JPG sizing (preserve aspect)
-        outer.addWidget(self._lbl("Ukuran JPG (jaga aspect ratio)"))
-        rule_row = QHBoxLayout()
-        rule_row.setSpacing(8)
-        self.rule_combo = QComboBox()
-        self.rule_combo.addItem("Sisi terpanjang (px)", JpgSizeRule.LONGEST_SIDE)
-        self.rule_combo.addItem("Maks megapixel (MP)", JpgSizeRule.MAX_MEGAPIXELS)
-        self.rule_combo.currentIndexChanged.connect(self._on_rule_changed)
-        self.size_spin = QSpinBox()
-        self.size_spin.setRange(100, 20000)
-        self.size_spin.setValue(4000)
-        self.size_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        rule_row.addWidget(self.rule_combo, 1)
-        rule_row.addWidget(self.size_spin)
-        outer.addLayout(rule_row)
+        # Daftar target (scroll)
+        self._rows: list[TargetRow] = []
+        self._rows_host = QWidget()
+        self._rows_lay = QVBoxLayout(self._rows_host)
+        self._rows_lay.setContentsMargins(0, 0, 0, 0)
+        self._rows_lay.setSpacing(8)
+        self._rows_lay.addStretch(1)
+        rows_scroll = QScrollArea()
+        rows_scroll.setWidget(self._rows_host)
+        rows_scroll.setWidgetResizable(True)
+        rows_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        rows_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        outer.addWidget(rows_scroll, 1)
+        for t in targets_store.load_targets():
+            self._append_row(t)
 
-        # DPI + Quality
+        # DPI + Output dir
         dq = QHBoxLayout()
         dq.setSpacing(10)
         dcol = QVBoxLayout()
         dcol.addWidget(self._lbl("DPI"))
         self.dpi_spin = self._spin(72, 1200, 300)
         dcol.addWidget(self.dpi_spin)
-        qcol = QVBoxLayout()
-        qcol.addWidget(self._lbl("JPG Quality"))
-        self.q_spin = self._spin(50, 100, 92)
-        qcol.addWidget(self.q_spin)
         dq.addLayout(dcol)
-        dq.addLayout(qcol)
+        dq.addStretch(1)
         outer.addLayout(dq)
 
-        # Output dir
-        outer.addWidget(self._lbl("Output Directory"))
+        outer.addWidget(self._lbl("Output Directory (base)"))
         path_row = QHBoxLayout()
         path_row.setSpacing(8)
         self.path_edit = QLineEdit("~/StockRanger/output/")
@@ -193,9 +266,7 @@ class Inspector(QTabWidget):
         path_row.addWidget(browse)
         outer.addLayout(path_row)
 
-        outer.addStretch(1)
-
-        self.process_btn = QPushButton("  Process seleksi")
+        self.process_btn = QPushButton("  Process → target aktif")
         self.process_btn.setObjectName("primary")
         self.process_btn.setIcon(icons.icon("zap", "#08240f", 18))
         self.process_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -205,16 +276,28 @@ class Inspector(QTabWidget):
 
         self.addTab(wrap, "Export")
 
-    def _on_rule_changed(self, _i):
-        rule = self.rule_combo.currentData()
-        if rule == JpgSizeRule.MAX_MEGAPIXELS:
-            self.size_spin.setRange(1, 100)
-            self.size_spin.setValue(16)
-            self.size_spin.setSuffix(" MP")
-        else:
-            self.size_spin.setSuffix("")
-            self.size_spin.setRange(100, 20000)
-            self.size_spin.setValue(4000)
+    def _append_row(self, target: ExportTarget):
+        row = TargetRow(target)
+        row.changed.connect(self._persist_targets)
+        row.deleted.connect(self._remove_row)
+        self._rows.append(row)
+        self._rows_lay.insertWidget(self._rows_lay.count() - 1, row)
+
+    def _add_target(self):
+        self._append_row(ExportTarget("Microstock baru", OutputMode.PAIR_ZIP))
+        self._persist_targets()
+
+    def _remove_row(self, row: TargetRow):
+        if row in self._rows:
+            self._rows.remove(row)
+            row.deleteLater()
+            self._persist_targets()
+
+    def get_targets(self) -> list[ExportTarget]:
+        return [r.to_target() for r in self._rows]
+
+    def _persist_targets(self):
+        targets_store.save_targets(self.get_targets())
 
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "Pilih output directory", str(Path.home()))

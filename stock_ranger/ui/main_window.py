@@ -250,13 +250,13 @@ class MainWindow(QMainWindow):
 
         meta = self.inspector.metadata.get_metadata()
         ins = self.inspector
+        targets = [t for t in ins.get_targets() if t.enabled]
+        if not targets:
+            self._set_status("alert", Color.WARNING, "Tidak ada target aktif (tab Export)")
+            return
         settings = OutputSettings(
             out_dir=Path(ins.path_edit.text().strip() or "~/StockRanger/output"),
-            output_mode=ins.mode_combo.currentData(),
-            jpg_rule=ins.rule_combo.currentData(),
-            jpg_value=ins.size_spin.value(),
             dpi=ins.dpi_spin.value(),
-            jpg_quality=ins.q_spin.value(),
             jpg_mode=JpgMode.AUTO,
         )
 
@@ -275,11 +275,12 @@ class MainWindow(QMainWindow):
         self.log_action.setChecked(True)
         self.log_panel.setVisible(True)
         self._set_processing(True)
-        self._set_status("zap", Color.ACCENT, f"Memproses {len(svgs)} SVG…")
-        self._log(f"▶ Mulai {len(svgs)} SVG · mode={settings.output_mode.value} · "
-                  f"jpg={settings.jpg_rule.value}={settings.jpg_value}")
+        names = ", ".join(t.name for t in targets)
+        self._set_status("zap", Color.ACCENT, f"Memproses {len(svgs)} SVG → {len(targets)} target…")
+        self._log(f"▶ Mulai {len(svgs)} SVG → target: {names}")
 
-        self._worker = PipelineWorker(svgs, meta, settings, prefer_swop=False, manual_jpgs=manual)
+        self._worker = PipelineWorker(svgs, meta, settings, prefer_swop=False,
+                                      manual_jpgs=manual, targets=targets)
         self._worker.logLine.connect(self._log)
         self._worker.progressed.connect(self._progress.setValue)
         self._worker.done.connect(self._on_done)

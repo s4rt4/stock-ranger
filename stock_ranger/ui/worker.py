@@ -7,8 +7,8 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..core import profile_manager
-from ..core.models import Metadata, OutputSettings
-from ..core.pipeline import process_batch
+from ..core.models import ExportTarget, Metadata, OutputSettings
+from ..core.pipeline import process_batch, process_batch_multi
 
 
 class PipelineWorker(QThread):
@@ -23,6 +23,7 @@ class PipelineWorker(QThread):
         settings: OutputSettings,
         prefer_swop: bool,
         manual_jpgs: dict[str, Path] | None = None,
+        targets: list[ExportTarget] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -31,6 +32,7 @@ class PipelineWorker(QThread):
         self._settings = settings
         self._prefer_swop = prefer_swop
         self._manual_jpgs = manual_jpgs or {}
+        self._targets = targets
 
     def run(self):  # noqa: D401 — dijalankan di thread terpisah
         # Resolusi profile (first-run download SWOP bila diminta & belum ada)
@@ -45,14 +47,18 @@ class PipelineWorker(QThread):
         prof = self._settings.icc_profile
         self.logLine.emit(f"ICC profile: {prof.name if prof else 'tidak ada (RGB!)'}")
 
-        results = process_batch(
-            self._svgs,
-            self._meta,
-            self._settings,
-            log=self.logLine.emit,
-            progress=self._on_progress,
-            manual_jpgs=self._manual_jpgs,
-        )
+        if self._targets:
+            results = process_batch_multi(
+                self._svgs, self._meta, self._targets, self._settings,
+                log=self.logLine.emit, progress=self._on_progress,
+                manual_jpgs=self._manual_jpgs,
+            )
+        else:
+            results = process_batch(
+                self._svgs, self._meta, self._settings,
+                log=self.logLine.emit, progress=self._on_progress,
+                manual_jpgs=self._manual_jpgs,
+            )
         ok = sum(1 for r in results if r.ok)
         self.progressed.emit(100)
         self.done.emit(ok, len(results))
