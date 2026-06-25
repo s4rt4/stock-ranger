@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Stock Ranger
+GenericName=Microstock Prep Tool
+Comment=SVG → EPS 10 CMYK + JPG + metadata, siap upload Shutterstock
+Exec=python3 /var/www/html/stock-ranger/main.py
+Path=/var/www/html/stock-ranger
+Icon=stock-ranger
+Terminal=false
+Categories=Graphics;2DGraphics;VectorGraphics;
+Keywords=microstock;shutterstock;svg;eps;cmyk;vector;
+StartupNotify=true
+StartupWMClass=Stock Ranger
