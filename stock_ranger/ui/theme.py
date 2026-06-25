@@ -204,7 +204,7 @@ def stylesheet() -> str:
         border: none;
         border-right: 1px solid {c.BORDER};
         padding: 6px 4px;
-        show-decoration-selected: 1;
+        show-decoration-selected: 0;
     }}
     QTreeView#folderTree::item {{
         padding: 4px 2px;
@@ -213,6 +213,9 @@ def stylesheet() -> str:
     }}
     QTreeView#folderTree::item:hover {{ background: {c.SURFACE_2}; color: {c.TEXT}; }}
     QTreeView#folderTree::item:selected {{ background: {c.ACCENT_SOFT}; color: {c.TEXT}; }}
+    QTreeView#folderTree::branch {{ background: {c.SURFACE}; }}
+    QTreeView#folderTree::branch:hover {{ background: {c.SURFACE_2}; }}
+    QTreeView#folderTree::branch:selected {{ background: {c.ACCENT_SOFT}; }}
 
     /* ---------- Bridge: content grid (tengah) ---------- */
     QListWidget#contentGrid {{

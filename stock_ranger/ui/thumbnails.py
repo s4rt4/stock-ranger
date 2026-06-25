@@ -66,6 +66,32 @@ def _placeholder(label: str, size: int) -> QPixmap:
     return canvas
 
 
+def _render_eps_via_gs(path: Path, size: int) -> QPixmap | None:
+    """Fallback EPS thumbnail: render via Ghostscript (untuk EPS Adobe yang
+    preview TIFF-nya pakai offset absolut → tak terbaca PIL)."""
+    import shutil
+    import subprocess
+    import tempfile
+    if not shutil.which("gs"):
+        return None
+    try:
+        with tempfile.TemporaryDirectory(prefix="sr_epsthumb_") as td:
+            png = Path(td) / "t.png"
+            subprocess.run(
+                ["gs", "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-dEPSCrop",
+                 "-sDEVICE=png16m", "-r36", "-dGraphicsAlphaBits=4",
+                 "-dTextAlphaBits=4", f"-sOutputFile={png}", str(path)],
+                capture_output=True, timeout=20,
+            )
+            if png.exists():
+                src = QPixmap(str(png))
+                if not src.isNull():
+                    return _fit_onto(src, size)
+    except Exception:
+        pass
+    return None
+
+
 def _extract_eps_preview(path: Path) -> QPixmap | None:
     """Ambil embedded TIFF preview dari DOS-EPS wrapper (C5D0D3C6)."""
     try:
@@ -114,7 +140,10 @@ def render_thumbnail(path: Path, size: int) -> QPixmap:
             return _placeholder(ext[1:].upper(), size)
         if ext in EPS_EXT:
             pm = _extract_eps_preview(path)
-            return _fit_onto(pm, size) if pm else _placeholder("EPS", size)
+            if pm:
+                return _fit_onto(pm, size)
+            pm = _render_eps_via_gs(path, size)  # fallback EPS Adobe
+            return pm if pm else _placeholder("EPS", size)
         if ext in VECTOR_EXT:
             return _placeholder(ext[1:].upper(), size)
     except Exception:

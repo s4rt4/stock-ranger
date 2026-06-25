@@ -58,3 +58,36 @@ def read_back(target: Path) -> dict[str, str]:
             k, _, v = line.partition(":")
             out[k.strip()] = v.strip()
     return out
+
+
+def read_metadata(target: Path) -> Metadata:
+    """Baca Title/Description/Keywords dari file (EPS/JPG/dll) -> Metadata.
+
+    Pakai output JSON exiftool (robust untuk list keyword). Coba XMP dulu,
+    fallback IPTC. Metadata kosong bila file tak terbaca / tanpa metadata.
+    """
+    import json
+
+    try:
+        proc = run([
+            "exiftool", "-j",
+            "-XMP-dc:Title", "-IPTC:ObjectName",
+            "-XMP-dc:Description", "-IPTC:Caption-Abstract",
+            "-XMP-dc:Subject", "-IPTC:Keywords",
+            str(target),
+        ])
+        data = json.loads(proc.stdout)[0]
+    except Exception:  # noqa: BLE001 - file tak terbaca / no metadata
+        return Metadata()
+
+    def as_list(v) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        return [s.strip() for s in str(v).split(",") if s.strip()]
+
+    title = str(data.get("Title") or data.get("ObjectName") or "")
+    desc = str(data.get("Description") or data.get("Caption-Abstract") or "")
+    keywords = as_list(data.get("Subject")) or as_list(data.get("Keywords"))
+    return Metadata(title=title, description=desc, keywords=keywords)

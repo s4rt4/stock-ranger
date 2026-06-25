@@ -143,6 +143,7 @@ class Inspector(QTabWidget):
     # ---------- Metadata tab ----------
     def _build_metadata_tab(self):
         wrap = QWidget()
+        wrap.setStyleSheet(f"background:{Color.SURFACE};")
         v = QVBoxLayout(wrap)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -173,10 +174,12 @@ class Inspector(QTabWidget):
         iv.addWidget(self.props_box)
         iv.addWidget(self.metadata)
         iv.addStretch(1)
+        inner.setStyleSheet(f"background:{Color.SURFACE};")
         scroll.setWidget(inner)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(f"QScrollArea{{background:{Color.SURFACE};border:none;}}")
         v.addWidget(scroll)
         self.addTab(wrap, "Metadata")
 
@@ -188,6 +191,7 @@ class Inspector(QTabWidget):
             key.setStyleSheet(f"color:{Color.TEXT_FAINT};font-size:11px;")
             value = QLabel(val)
             value.setStyleSheet(f"color:{Color.TEXT};font-size:12px;")
+            value.setWordWrap(True)  # nama file panjang membungkus, tidak terpotong
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self.props_form.addRow(key, value)
 
@@ -199,12 +203,19 @@ class Inspector(QTabWidget):
         if count > 1:
             props = {"Selection": f"{count} file", **props}
         self._set_props(props)
+        # Muat metadata existing file (EPS/JPG) ke editor bila ada — single select.
+        if count <= 1:
+            from ..core import metadata_writer
+            meta = metadata_writer.read_metadata(path)
+            if meta.title or meta.description or meta.keywords:
+                self.metadata.set_metadata(meta)
 
     # ---------- Export tab ----------
     def _build_export_tab(self):
         from PyQt6.QtWidgets import QToolButton
 
         wrap = QWidget()
+        wrap.setStyleSheet(f"background:{Color.SURFACE};")
         outer = QVBoxLayout(wrap)
         outer.setContentsMargins(14, 14, 14, 14)
         outer.setSpacing(10)
@@ -230,6 +241,7 @@ class Inspector(QTabWidget):
         # Daftar target (scroll)
         self._rows: list[TargetRow] = []
         self._rows_host = QWidget()
+        self._rows_host.setStyleSheet(f"background:{Color.SURFACE};")
         self._rows_lay = QVBoxLayout(self._rows_host)
         self._rows_lay.setContentsMargins(0, 0, 0, 0)
         self._rows_lay.setSpacing(8)
@@ -238,6 +250,7 @@ class Inspector(QTabWidget):
         rows_scroll.setWidget(self._rows_host)
         rows_scroll.setWidgetResizable(True)
         rows_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        rows_scroll.setStyleSheet(f"QScrollArea{{background:{Color.SURFACE};border:none;}}")
         rows_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(rows_scroll, 1)
         for t in targets_store.load_targets():
