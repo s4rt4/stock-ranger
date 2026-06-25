@@ -12,8 +12,8 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-from PyQt6.QtCore import QRectF, QSize, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPixmap
+from PyQt6.QtCore import QRect, QRectF, QSize, Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QColor, QFontMetrics, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
 from .imageconv import pil_to_qpixmap
@@ -113,8 +113,46 @@ def _extract_eps_preview(path: Path) -> QPixmap | None:
         return None
 
 
+# Warna badge per format (selaras token tema).
+_BADGE_COLORS = {
+    "eps": "#6366f1", "jpg": "#22c55e", "jpeg": "#22c55e",
+    "png": "#06b6d4", "svg": "#f5a623", "pdf": "#ef4444", "ai": "#ec4899",
+}
+
+
+def _draw_badge(pm: QPixmap, ext: str, size: int) -> QPixmap:
+    """Gambar badge format (mis. EPS/JPG) di pojok kiri-bawah thumbnail."""
+    label = ext.upper()
+    color = _BADGE_COLORS.get(ext, "#646c7c")
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    f = p.font()
+    f.setBold(True)
+    f.setPointSize(max(7, size // 16))
+    p.setFont(f)
+    fm = QFontMetrics(f)
+    pad_x, pad_y = 6, 2
+    bw = fm.horizontalAdvance(label) + pad_x * 2
+    bh = fm.height() + pad_y * 2
+    margin = 6
+    x, y = margin, size - bh - margin
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor(color))
+    p.drawRoundedRect(x, y, bw, bh, 5, 5)
+    p.setPen(QColor("#ffffff"))
+    p.drawText(QRect(x, y, bw, bh), Qt.AlignmentFlag.AlignCenter, label)
+    p.end()
+    return pm
+
+
 def render_thumbnail(path: Path, size: int) -> QPixmap:
-    """Render satu thumbnail. Dipanggil di worker thread (tanpa sentuh widget)."""
+    """Render thumbnail + badge format. Dipanggil di worker thread."""
+    pm = _render_base(path, size)
+    return _draw_badge(pm, path.suffix.lower().lstrip("."), size)
+
+
+def _render_base(path: Path, size: int) -> QPixmap:
+    """Render isi thumbnail (tanpa badge)."""
     ext = path.suffix.lower()
     try:
         if ext in SVG_EXT:
