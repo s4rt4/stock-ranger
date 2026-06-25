@@ -213,9 +213,7 @@ def stylesheet() -> str:
     }}
     QTreeView#folderTree::item:hover {{ background: {c.SURFACE_2}; color: {c.TEXT}; }}
     QTreeView#folderTree::item:selected {{ background: {c.ACCENT_SOFT}; color: {c.TEXT}; }}
-    QTreeView#folderTree::branch {{ background: {c.SURFACE}; }}
-    QTreeView#folderTree::branch:hover {{ background: {c.SURFACE_2}; }}
-    QTreeView#folderTree::branch:selected {{ background: {c.ACCENT_SOFT}; }}
+    /* JANGAN style ::branch background — itu menghapus panah expand/collapse default Qt */
 
     /* ---------- Bridge: content grid (tengah) ---------- */
     QListWidget#contentGrid {{

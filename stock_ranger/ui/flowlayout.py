@@ -61,6 +61,7 @@ class FlowLayout(QLayout):
             item = self._items.pop()
             w = item.widget()
             if w is not None:
+                w.setParent(None)  # lepas seketika dari tampilan (tak nunggu event loop)
                 w.deleteLater()
 
     def _do_layout(self, rect: QRect, test_only: bool) -> int:

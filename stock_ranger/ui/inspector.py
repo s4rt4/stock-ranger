@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..core import targets as targets_store
-from ..core.models import ExportTarget, JpgSizeRule, OutputMode
+from ..core.models import ExportTarget, JpgSizeRule, Metadata, OutputMode
 from . import icons
 from .panels import MetadataCard
 from .theme import Color
@@ -197,18 +197,19 @@ class Inspector(QTabWidget):
 
     def show_file(self, path: Path | None, count: int = 0):
         if path is None:
-            self._set_props({"Selection": f"{count} file dipilih" if count else "— kosong —"})
+            # Deselect → properties & editor metadata dikosongkan
+            self._set_props({"Selection": "— tidak ada file dipilih —"})
+            self.metadata.set_metadata(Metadata())
             return
         props = file_properties(path)
         if count > 1:
-            props = {"Selection": f"{count} file", **props}
+            # Multi-select: pertahankan editor (untuk metadata batch yang sama)
+            self._set_props({"Selection": f"{count} file", **props})
+            return
         self._set_props(props)
-        # Muat metadata existing file (EPS/JPG) ke editor bila ada — single select.
-        if count <= 1:
-            from ..core import metadata_writer
-            meta = metadata_writer.read_metadata(path)
-            if meta.title or meta.description or meta.keywords:
-                self.metadata.set_metadata(meta)
+        # Single select → tampilkan metadata file itu (kosong bila tak punya)
+        from ..core import metadata_writer
+        self.metadata.set_metadata(metadata_writer.read_metadata(path))
 
     # ---------- Export tab ----------
     def _build_export_tab(self):
