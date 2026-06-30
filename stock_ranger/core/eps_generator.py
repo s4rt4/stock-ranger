@@ -44,6 +44,19 @@ _PRIV_KEY = "AI_PrivateData"
 # Magic DOS-EPS binary header (TIFF preview wrapper).
 _DOS_EPS_MAGIC = b"\xc5\xd0\xd3\xc6"
 
+# Pilar C (spoof dalam): procset AGM/CoolType yang dicek detektor microstock ketat
+# (analisa §3 #2). Diinjeksikan sebagai KOMENTAR DSC inert (procset kosong) — 100%
+# aman karena diabaikan interpreter PostScript, tapi terbaca pemindai berbasis teks.
+# CATATAN: ini stub fingerprint, BUKAN artwork PGF asli (perlu Illustrator nyata).
+_DEEP_PROCSETS = [
+    ("Adobe_AGM_Utils", "1.0 0"),
+    ("Adobe_AGM_Core", "2.0 0"),
+    ("Adobe_CoolType_Utility_MAKEOCF", "1.23 0"),
+    ("Adobe_CoolType_Utility_T42", "1.0 0"),
+    ("Adobe_CoolType_Core", "2.31 0"),
+    ("Adobe_AGM_Image", "1.0 0"),
+]
+
 # Faktor satuan CSS → px @96dpi (untuk menghitung dimensi desain dari SVG).
 _UNIT_PX = {
     "": 1.0, "px": 1.0, "pt": 96.0 / 72.0, "pc": 16.0,
@@ -210,7 +223,11 @@ def pdf_to_cmyk_eps(
 # ── Post-processing ──────────────────────────────────────────────────────────
 
 def scrub_and_spoof_header(
-    ps_bytes: bytes, *, title: str, color_mode: ColorMode = ColorMode.RGB
+    ps_bytes: bytes,
+    *,
+    title: str,
+    color_mode: ColorMode = ColorMode.RGB,
+    deep_spoof: bool = True,
 ) -> bytes:
     """Buang fingerprint Ghostscript & sisipkan header DSC ala Illustrator.
 
@@ -218,6 +235,9 @@ def scrub_and_spoof_header(
     di-rename konsisten sehingga PostScript tetap valid). Tidak mengubah operator
     grafis/warna — hasil render identik. `%%DocumentProcessColors` HANYA ditulis
     pada mode CMYK (mengikuti sample Illustrator).
+
+    deep_spoof (Pilar C): tambah marker header ala AI11EPS (client injection) —
+    komentar DSC inert, terbaca detektor ketat.
     """
     text = ps_bytes.decode("latin1")
 
@@ -245,12 +265,20 @@ def scrub_and_spoof_header(
     if color_mode == ColorMode.CMYK:
         proc_colors = "%%DocumentProcessColors: Cyan Magenta Yellow Black\n"
 
+    ai_inject = ""
+    if deep_spoof:
+        ai_inject = (
+            '%ADOBeginClientInjection: DocumentHeader "AI11EPS"\n'
+            '%ADOEndClientInjection: DocumentHeader "AI11EPS"\n'
+        )
+
     new_head = (
         "%!PS-Adobe-3.1 EPSF-3.0\n"
         "%ADO_DSC_Encoding: Windows Roman\n"
         f"%%Title: {title}\n"
         f"%%Creator: {_AI_CREATOR}\n"
         f"%%AI8_CreatorVersion: {_AI_VERSION}\n"
+        "%%For: (Adobe Illustrator)\n"
         f"%%BoundingBox: {bbox_i}\n"
         f"%%HiResBoundingBox: {bbox_hr}\n"
         "%%LanguageLevel: 2\n"
@@ -258,8 +286,43 @@ def scrub_and_spoof_header(
         + crdate
         + proc_colors
         + "%%Pages: 1\n"
+        + ai_inject
     )
     return (new_head + body).encode("latin1")
+
+
+def inject_deep_spoof(ps_bytes: bytes) -> bytes:
+    """Pilar C: sisipkan stub procset AGM/CoolType + marker AI di prolog.
+
+    Semua berupa KOMENTAR DSC inert (procset kosong, blok data 0-byte) → diabaikan
+    interpreter, render identik, tapi memuaskan detektor microstock yang memindai
+    nama procset / marker `%AI9_DataStream`. Bukan artwork PGF asli — fingerprint
+    saja (analisa §3 #2-4, Pilar C).
+    """
+    text = ps_bytes.decode("latin1")
+    if "%%BeginProlog" not in text or "Adobe_AGM_Core" in text:
+        return ps_bytes  # tak ada prolog / sudah diinjeksi
+
+    lines = []
+    for name, ver in _DEEP_PROCSETS:
+        lines += [
+            f"%%BeginResource: procset {name} {ver}",
+            f"%%Version: {ver}",
+            "%%Copyright: Copyright 1987-2018 Adobe Systems Incorporated.",
+            "%%EndResource",
+        ]
+    block = "\n".join(lines) + "\n" + (
+        "%AI7_Thumbnail: 108 128 8\n"
+        "%%BeginData: 0 Hex Bytes\n"
+        "%%EndData\n"
+        "%AI9_DataStream\n"
+        "%AI9_PrivateDataBegin\n"
+        "%AI9_PrivateDataEnd\n"
+        "%AI9_PrintingDataBegin\n"
+        "%AI9_PrintingDataEnd\n"
+    )
+    text = text.replace("%%BeginProlog\n", "%%BeginProlog\n" + block, 1)
+    return text.encode("latin1")
 
 
 def render_preview_tiff(
@@ -334,6 +397,7 @@ def generate(
     icc_profile: Path | None = None,
     embed_preview: bool = True,
     spoof_header: bool = True,
+    deep_spoof: bool = True,
     on_raw: "Callable[[Path], None] | None" = None,
     timeout: int = 120,
 ) -> Path:
@@ -343,6 +407,9 @@ def generate(
     bila CMYK.
 
     scale_to_px: terapkan match_px_to_pt() agar bbox-pt = px desain (lolos ≥4MP).
+
+    deep_spoof (Pilar C): tambah stub procset AGM/CoolType + marker AI (komentar
+    inert) agar lolos detektor microstock ketat. Hanya berlaku bila spoof_header.
 
     on_raw: hook dipanggil dengan path EPS MENTAH (PostScript gs polos) sebelum
     spoof+wrap. Dipakai untuk embed metadata XMP — exiftool MENOLAK menulis XMP
@@ -378,8 +445,11 @@ def generate(
         ps_bytes = raw_eps.read_bytes()
         if spoof_header:
             ps_bytes = scrub_and_spoof_header(
-                ps_bytes, title=eps_out.name, color_mode=color_mode
+                ps_bytes, title=eps_out.name, color_mode=color_mode,
+                deep_spoof=deep_spoof,
             )
+            if deep_spoof:
+                ps_bytes = inject_deep_spoof(ps_bytes)
 
         if embed_preview:
             tiff = tdp / (svg.stem + ".tiff")
