@@ -7,7 +7,7 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..core import profile_manager
-from ..core.models import ExportTarget, Metadata, OutputSettings
+from ..core.models import ColorMode, ExportTarget, Metadata, OutputSettings
 from ..core.pipeline import process_batch, process_batch_multi
 
 
@@ -35,17 +35,21 @@ class PipelineWorker(QThread):
         self._targets = targets
 
     def run(self):  # noqa: D401 — dijalankan di thread terpisah
-        # Resolusi profile (first-run download SWOP bila diminta & belum ada)
-        if self._prefer_swop and profile_manager.swop_path() is None:
-            try:
-                self.logLine.emit("Mengunduh profile SWOP v2 dari Adobe…")
-                p = profile_manager.download_swop()
-                self.logLine.emit(f"Profile tersimpan: {p.name}")
-            except Exception as e:  # noqa: BLE001
-                self.logLine.emit(f"Gagal unduh SWOP ({e}); pakai Ghostscript default")
-        self._settings.icc_profile = profile_manager.resolve_profile(self._prefer_swop)
-        prof = self._settings.icc_profile
-        self.logLine.emit(f"ICC profile: {prof.name if prof else 'tidak ada (RGB!)'}")
+        if self._settings.color_mode == ColorMode.CMYK:
+            # First-run download SWOP bila diminta & belum ada.
+            if self._prefer_swop and profile_manager.swop_path() is None:
+                try:
+                    self.logLine.emit("Mengunduh profile SWOP v2 dari Adobe…")
+                    p = profile_manager.download_swop()
+                    self.logLine.emit(f"Profile tersimpan: {p.name}")
+                except Exception as e:  # noqa: BLE001
+                    self.logLine.emit(f"Gagal unduh SWOP ({e}); pakai Ghostscript default")
+            self._settings.icc_profile = profile_manager.resolve_profile(self._prefer_swop)
+            prof = self._settings.icc_profile
+            self.logLine.emit(f"Mode CMYK · ICC profile: {prof.name if prof else 'gs default'}")
+        else:
+            self._settings.icc_profile = None
+            self.logLine.emit("Mode RGB (sRGB) — rekomendasi microstock")
 
         if self._targets:
             results = process_batch_multi(

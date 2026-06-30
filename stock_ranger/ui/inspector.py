@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..core import targets as targets_store
-from ..core.models import ExportTarget, JpgSizeRule, Metadata, OutputMode
+from ..core.models import ColorMode, ExportTarget, JpgSizeRule, Metadata, OutputMode
 from . import icons
 from .panels import MetadataCard
 from .theme import Color
@@ -257,15 +257,25 @@ class Inspector(QTabWidget):
         for t in targets_store.load_targets():
             self._append_row(t)
 
-        # DPI + Output dir
+        # Mode warna + DPI
         dq = QHBoxLayout()
         dq.setSpacing(10)
+        ccol = QVBoxLayout()
+        ccol.addWidget(self._lbl("Mode Warna"))
+        self.color_combo = QComboBox()
+        self.color_combo.addItem("RGB (microstock)", ColorMode.RGB)
+        self.color_combo.addItem("CMYK (cetak)", ColorMode.CMYK)
+        self.color_combo.setToolTip(
+            "RGB/sRGB = rekomendasi microstock (Shutterstock konversi ke sRGB).\n"
+            "CMYK = untuk klien cetak; profil SWOP diunduh saat pertama dipakai."
+        )
+        ccol.addWidget(self.color_combo)
+        dq.addLayout(ccol, 1)
         dcol = QVBoxLayout()
         dcol.addWidget(self._lbl("DPI"))
         self.dpi_spin = self._spin(72, 1200, 300)
         dcol.addWidget(self.dpi_spin)
         dq.addLayout(dcol)
-        dq.addStretch(1)
         outer.addLayout(dq)
 
         outer.addWidget(self._lbl("Output Directory (base)"))
@@ -309,6 +319,9 @@ class Inspector(QTabWidget):
 
     def get_targets(self) -> list[ExportTarget]:
         return [r.to_target() for r in self._rows]
+
+    def color_mode(self) -> ColorMode:
+        return self.color_combo.currentData()
 
     def _persist_targets(self):
         targets_store.save_targets(self.get_targets())

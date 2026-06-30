@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from . import eps_generator, jpg_generator, metadata_writer, profile_manager, svg_parser, zip_builder
-from .models import ExportTarget, JobResult, JpgMode, Metadata, OutputMode, OutputSettings
+from .models import ColorMode, ExportTarget, JobResult, JpgMode, Metadata, OutputMode, OutputSettings
 
 # Callback log: (pesan) -> None
 LogFn = Callable[[str], None]
@@ -24,6 +24,32 @@ _STAGES = 5  # validate, eps, jpg, metadata, zip
 
 def _noop_log(_msg: str) -> None:
     pass
+
+
+def _resolve_icc(settings: OutputSettings):
+    """ICC profile hanya relevan untuk CMYK; RGB → None."""
+    if settings.color_mode != ColorMode.CMYK:
+        return None
+    return settings.icc_profile or profile_manager.resolve_profile()
+
+
+def _validate_eps(eps: Path, color_mode: ColorMode) -> list[str]:
+    """Peringatan kualitas EPS: ketidakcocokan mode warna + bbox di luar 4–25 MP.
+
+    TIDAK memperingatkan K=0 (sah untuk warna jenuh — lihat analisa §1b).
+    """
+    warns: list[str] = []
+    detected = eps_generator.source_colorspace(eps)
+    want = "CMYK" if color_mode == ColorMode.CMYK else "RGB"
+    if detected not in (want, "?"):
+        warns.append(f"Mode warna output {detected} ≠ diminta {want}")
+    mp = eps_generator.bbox_megapixels(eps)
+    if mp is not None:
+        if mp < 4.0:
+            warns.append(f"Bounding box {mp:.2f} MP < 4 MP — Shutterstock akan menolak")
+        elif mp > 25.0:
+            warns.append(f"Bounding box {mp:.2f} MP > 25 MP — melebihi batas EPS")
+    return warns
 
 
 def process_one(
@@ -42,7 +68,7 @@ def process_one(
     result = JobResult(source=svg)
     out_dir = Path(settings.out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
-    icc = settings.icc_profile or profile_manager.resolve_profile()
+    icc = _resolve_icc(settings)
 
     def step(stage: int, msg: str) -> None:
         log(f"[{svg.name}] {msg}")
@@ -58,16 +84,15 @@ def process_one(
             return result
         result.warnings.extend(info.warnings)
 
-        # 2. EPS 10 CMYK — metadata XMP di-embed ke EPS MENTAH via on_raw hook
+        # 2. EPS 10 — metadata XMP di-embed ke EPS MENTAH via on_raw hook
         #    (exiftool menolak XMP ke EPS ber-header Illustrator → harus pre-spoof)
-        step(2, "generate EPS 10 CMYK + metadata…")
+        step(2, f"generate EPS 10 {settings.color_mode.value.upper()} + metadata…")
         eps = out_dir / f"{svg.stem}.eps"
         eps_generator.generate(
-            svg, eps, icc_profile=icc,
+            svg, eps, color_mode=settings.color_mode, icc_profile=icc,
             on_raw=lambda raw: metadata_writer.embed(raw, meta),
         )
-        if not eps_generator.is_cmyk_eps(eps):
-            result.warnings.append("EPS tidak terdeteksi CMYK (cek profile)")
+        result.warnings.extend(_validate_eps(eps, settings.color_mode))
         result.eps_path = eps
 
         # 3. JPG (lewati untuk mode EPS_ONLY / Kel.1)
@@ -162,7 +187,7 @@ def process_one_multi(
     svg = Path(svg)
     result = JobResult(source=svg)
     base = Path(settings.out_dir).expanduser()
-    icc = settings.icc_profile or profile_manager.resolve_profile()
+    icc = _resolve_icc(settings)
     active = [t for t in targets if t.enabled]
     if not active:
         result.error = "Tidak ada target aktif"
@@ -185,14 +210,13 @@ def process_one_multi(
             tdp = Path(td)
 
             # 1. EPS sekali (metadata via on_raw)
-            step(2, "generate EPS 10 CMYK + metadata…")
+            step(2, f"generate EPS 10 {settings.color_mode.value.upper()} + metadata…")
             eps_master = tdp / f"{svg.stem}.eps"
             eps_generator.generate(
-                svg, eps_master, icc_profile=icc,
+                svg, eps_master, color_mode=settings.color_mode, icc_profile=icc,
                 on_raw=lambda raw: metadata_writer.embed(raw, meta),
             )
-            if not eps_generator.is_cmyk_eps(eps_master):
-                result.warnings.append("EPS tidak terdeteksi CMYK (cek profile)")
+            result.warnings.extend(_validate_eps(eps_master, settings.color_mode))
 
             # 2. JPG cache per (rule,value,quality) unik
             jpg_cache: dict[tuple, Path] = {}

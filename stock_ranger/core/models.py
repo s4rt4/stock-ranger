@@ -12,6 +12,17 @@ class JpgMode(str, Enum):
     MANUAL = "manual"   # pakai JPG existing yang di-pair
 
 
+class ColorMode(str, Enum):
+    """Colorspace output EPS.
+
+    RGB = default microstock (Shutterstock approve & konversi semua ke sRGB).
+    CMYK = untuk klien cetak (gs black-generate netral/gelap; ICC opsional).
+    """
+
+    RGB = "rgb"
+    CMYK = "cmyk"
+
+
 class OutputMode(str, Enum):
     """Mode paket output sesuai kebijakan microstock."""
 
@@ -56,7 +67,8 @@ class OutputSettings:
     dpi: int = 300
     jpg_quality: int = 92
     jpg_mode: JpgMode = JpgMode.AUTO
-    icc_profile: Path | None = None  # None → resolusi otomatis (SWOP / gs default)
+    color_mode: ColorMode = ColorMode.RGB  # default microstock (sRGB)
+    icc_profile: Path | None = None  # None → resolusi otomatis (SWOP / gs default); hanya CMYK
 
     @property
     def needs_jpg(self) -> bool:

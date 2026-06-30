@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..core.models import JpgMode, OutputSettings
+from ..core.models import ColorMode, JpgMode, OutputSettings
 from . import icons
 from .browser import ContentGrid, FolderTree
 from .inspector import Inspector
@@ -268,10 +268,12 @@ class MainWindow(QMainWindow):
         if not targets:
             self._set_status("alert", Color.WARNING, "Tidak ada target aktif (tab Export)")
             return
+        color_mode = ins.color_mode()
         settings = OutputSettings(
             out_dir=Path(ins.path_edit.text().strip() or "~/StockRanger/output"),
             dpi=ins.dpi_spin.value(),
             jpg_mode=JpgMode.AUTO,
+            color_mode=color_mode,
         )
 
         # Auto-pair JPG sibling (nama sama) di folder yang sama → mode manual.
@@ -293,7 +295,8 @@ class MainWindow(QMainWindow):
         self._set_status("zap", Color.ACCENT, f"Memproses {len(svgs)} SVG → {len(targets)} target…")
         self._log(f"▶ Mulai {len(svgs)} SVG → target: {names}")
 
-        self._worker = PipelineWorker(svgs, meta, settings, prefer_swop=False,
+        self._worker = PipelineWorker(svgs, meta, settings,
+                                      prefer_swop=(color_mode == ColorMode.CMYK),
                                       manual_jpgs=manual, targets=targets)
         self._worker.logLine.connect(self._log)
         self._worker.progressed.connect(self._progress.setValue)
