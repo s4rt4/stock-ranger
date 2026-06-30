@@ -1,26 +1,37 @@
 # Stock Ranger
 
-Desktop app Linux untuk contributor microstock (fokus Shutterstock). Mengubah
-file SVG dari Inkscape menjadi paket **ZIP siap upload**: EPS 10 CMYK + JPG
-preview, lengkap dengan metadata XMP/IPTC ter-embed — mengisi gap yang
-ditinggalkan Adobe Bridge & Xpiks di Linux.
+Desktop app Linux untuk contributor microstock. Mengubah file SVG dari Inkscape
+menjadi paket **siap upload**: EPS 10 + JPG preview, lengkap dengan metadata
+XMP/IPTC ter-embed — mengisi gap tooling vektor→microstock di Linux.
 
 ![Stock Ranger UI](poc/ui_final.png)
+
+## Fitur
+
+- **Konversi SVG → EPS 10** dengan dua mode warna: **RGB** (default microstock)
+  atau **CMYK** (cetak), dipilih per batch.
+- **Resolusi terjaga** — output dipastikan memenuhi syarat minimum megapixel
+  microstock, dihitung dari bounding box artwork.
+- **JPG preview** ter-rasterize dengan aturan ukuran/kualitas yang dapat diatur.
+- **Metadata XMP/IPTC** (judul, deskripsi, keyword) di-embed ke EPS *dan* JPG.
+- **Multi-target preset** — satu batch sekaligus di-export ke beberapa microstock
+  dengan paket berbeda (ZIP berpasangan / file lepas / EPS-only) per target.
+- **Batch & UI** — folder tree, grid thumbnail, inspector metadata, drag & drop,
+  template metadata (save/load), import JPG manual, log panel.
 
 ## Pipeline
 
 ```
 SVG (Inkscape)
   → validasi
-  → EPS 10 CMYK   (Inkscape→PDF→Ghostscript, RGB→CMYK via ICC)
-  → JPG preview   (Inkscape rasterize + Pillow)
-  → embed metadata XMP/IPTC (ExifTool, ke EPS & JPG)
-  → ZIP siap upload
+  → EPS 10 (RGB atau CMYK)   (Inkscape → PDF → Ghostscript)
+  → JPG preview              (Inkscape rasterize + Pillow)
+  → embed metadata XMP/IPTC  (ExifTool, ke EPS & JPG)
+  → ZIP / file lepas siap upload
 ```
 
-Konversi warna vektor RGB→CMYK dilakukan **Ghostscript** di level device; konversi
-raster pakai **LittleCMS** (`PIL.ImageCms`). Detail keputusan teknis ada di
-[`poc/POC_RESULTS.md`](poc/POC_RESULTS.md).
+Konversi warna vektor ke CMYK dilakukan **Ghostscript** di level device; konversi
+raster pakai **LittleCMS** (`PIL.ImageCms`).
 
 ## Dependencies
 
@@ -49,36 +60,39 @@ python3 -m stock_ranger.core.pipeline input.svg -o ./out \
     --title "Judul" --desc "Deskripsi" --keywords "a,b,c"
 ```
 
-## ICC Profile
+## ICC Profile (mode CMYK)
 
-Default Shutterstock adalah *US Web Coated (SWOP) v2* (milik Adobe). Karena lisensi
-Adobe melarang bundling profile di dalam aplikasi, Stock Ranger **mengunduhnya saat
-runtime** ke `~/.local/share/stock-ranger/profiles/` (user memperoleh langsung dari
-Adobe). Jika dilewati, app memakai `default_cmyk.icc` Ghostscript yang
-SWOP-equivalent dan boleh didistribusi.
+Untuk mode CMYK, Stock Ranger memakai profil ICC CMYK standar industri yang
+**diunduh saat runtime** ke `~/.local/share/stock-ranger/profiles/`. Jika
+dilewati, app memakai `default_cmyk.icc` bawaan Ghostscript yang setara dan boleh
+didistribusi. Mode RGB tidak memerlukan profil ICC.
 
 ## Arsitektur
 
 ```
 stock_ranger/
 ├── core/      # pipeline headless (testable, tanpa Qt)
-│   ├── pipeline.py        svg_parser.py    eps_generator.py
-│   ├── jpg_generator.py   metadata_writer.py  zip_builder.py
-│   ├── file_pairer.py     profile_manager.py  deps.py  models.py
-└── ui/        # PyQt6 — dark theme, collapsible sidebar, toolbar
-    ├── main_window.py  sidebar.py  panels.py  worker.py
-    ├── theme.py  icons.py  flowlayout.py
+│   ├── pipeline.py        svg_parser.py      eps_generator.py
+│   ├── jpg_generator.py   metadata_writer.py zip_builder.py
+│   ├── file_pairer.py     profile_manager.py preview.py
+│   ├── templates.py       deps.py            models.py  util.py
+└── ui/        # PyQt6 — dark theme, folder tree | grid | inspector
+    ├── main_window.py  sidebar.py  panels.py  inspector.py
+    ├── worker.py  preview_worker.py  theme.py  icons.py
+    ├── flowlayout.py   imageconv.py
 ```
 
 ## Status
 
 - **Fase 1 (MVP)** — pipeline inti + UI ✅ selesai & teruji end-to-end.
-- **Fase 2 (Batch & Metadata UX)** — ✅ selesai: drag & drop SVG, live preview
-  RGB vs CMYK (soft-proof LittleCMS) + gamut warning aktual, metadata template
-  (save/load preset), manual JPG import + pairing, log panel.
-- **Fase 3 (Polish & Packaging)** — TIC check, ICC selector lanjutan, settings
-  persistence, packaging (.deb / RPM / Windows) — menyusul.
+- **Fase 2 (Batch & Metadata UX)** — ✅ selesai: drag & drop, live preview
+  RGB/CMYK (soft-proof LittleCMS) + gamut warning, template metadata, manual JPG
+  import + pairing, multi-target preset, log panel.
+- **Fase 3 (Polish & Packaging)** — settings persistence, packaging
+  (.deb / RPM / Windows) — menyusul.
 
 ## Lisensi
 
-Kode: MIT. Profile ICC Adobe **tidak** termasuk dalam repo ini.
+Kode: MIT.
+</content>
+</invoke>
